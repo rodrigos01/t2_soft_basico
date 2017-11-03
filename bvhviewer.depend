@@ -17,3 +17,13 @@
 	<GLUT/glut.h>
 	<GL/glut.h>
 
+1509227084 source:/home/13205014/DriveH/soft_basico/t2/main.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+	<math.h>
+	<windows.h>
+	"gl/glut.h"
+	<GLUT/glut.h>
+	<GL/glut.h>
+

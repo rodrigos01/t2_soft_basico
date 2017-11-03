@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef WIN32
 #include <windows.h>    // somente no Windows
@@ -17,9 +18,7 @@
 #ifdef __APPLE__
 #include <GLUT/glut.h>
 #else
-
 #include <GL/glut.h>
-
 #endif
 
 typedef struct Node Node;
@@ -56,7 +55,7 @@ GLfloat rotX = 0, rotY = 0, rotX_ini = 0, rotY_ini = 0;
 GLfloat ratio;
 GLfloat angY, angX;
 int x_ini = 0, y_ini = 0, bot = 0;
-float Obs[3] = {0, 0, -80};
+float Obs[3] = {0, 0, -500};
 float Alvo[3];
 float ObsIni[3];
 
@@ -87,7 +86,7 @@ Node *createNode(char name[20], Node *parent, int numChannels, float ofx, float 
     if (parent)
         for (int i = 0; i < parent->numChildren; i++)
             if (!parent->children[i]) {
-//                printf("Insert at parent: %d\n", i);
+                //                printf("Insert at parent: %d\n", i);
                 parent->children[i] = aux;
                 break;
             }
@@ -168,57 +167,133 @@ void initMaleSkel() {
     apply();
 }
 
-// Sums two vectors, result in c
-void vsum(float a[3], float b[3], float c[3]) {
-    c[0] = a[0] + b[0];
-    c[1] = a[1] + b[1];
-    c[2] = a[2] + b[2];
-}
-
-//  Draw line segment from point 'aaa' to point 'bbb', colored 'col'.
-void drawLine(float col[3], float aaa[3], float bbb[3]) {
-    glColor3fv(col);
-    glBegin(GL_LINES);
-    glVertex3fv(aaa);
-    glVertex3fv(bbb);
-    glEnd();
-}
-
 float orange[] = {1, 0.5, 0};
 float yellow[] = {1, 1, 0};
 float red[] = {1, 0, 0};
 float white[] = {1, 1, 1};
 
-// Desenha um nodo da hierarquia (chamada recursiva)
-void drawNode(float pox, float poy, float poz, Node *node) {
-    float parentPos[3] = {pox, poy, poz};
-    float nodePos[3];
-    vsum(parentPos, node->offset, nodePos);  // right knee offset
+// Desenha um segmento do esqueleto (bone)
+void renderBone(float x0, float y0, float z0, float x1, float y1, float z1) {
+    GLdouble dir_x = x1 - x0;
+    GLdouble dir_y = y1 - y0;
+    GLdouble dir_z = z1 - z0;
+    GLdouble bone_length = sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z);
 
-    int c = 0;
+    static GLUquadricObj *quad_obj = NULL;
+    if (quad_obj == NULL)
+        quad_obj = gluNewQuadric();
+    gluQuadricDrawStyle(quad_obj, GLU_FILL);
+    gluQuadricNormals(quad_obj, GLU_SMOOTH);
+
     glPushMatrix();
 
-    glTranslatef(parentPos[0], parentPos[1], parentPos[2]);
-    if (node->channels == 6) {
-        glTranslatef(node->channelData[0], node->channelData[1], node->channelData[2]);
-        c = 3;
-    }
-    glRotatef(node->channelData[c++], 0, 0, 1);
-    glRotatef(node->channelData[c++], 1, 0, 0);
-    glRotatef(node->channelData[c++], 0, 1, 0);
-    glTranslatef(-parentPos[0], -parentPos[1], -parentPos[2]);
-    drawLine(yellow, parentPos, nodePos);
+    glTranslated(x0, y0, z0);
 
-    for (int i = 0; i < node->numChildren; i++) {
-        if (node->children[i])
-            drawNode(nodePos[0], nodePos[1], nodePos[2], node->children[i]);
+    double length;
+    length = sqrt(dir_x * dir_x + dir_y * dir_y + dir_z * dir_z);
+    if (length < 0.0001) {
+        dir_x = 0.0;
+        dir_y = 0.0;
+        dir_z = 1.0;
+        length = 1.0;
     }
+    dir_x /= length;
+    dir_y /= length;
+    dir_z /= length;
+
+    GLdouble up_x, up_y, up_z;
+    up_x = 0.0;
+    up_y = 1.0;
+    up_z = 0.0;
+
+    double side_x, side_y, side_z;
+    side_x = up_y * dir_z - up_z * dir_y;
+    side_y = up_z * dir_x - up_x * dir_z;
+    side_z = up_x * dir_y - up_y * dir_x;
+
+    length = sqrt(side_x * side_x + side_y * side_y + side_z * side_z);
+    if (length < 0.0001) {
+        side_x = 1.0;
+        side_y = 0.0;
+        side_z = 0.0;
+        length = 1.0;
+    }
+    side_x /= length;
+    side_y /= length;
+    side_z /= length;
+
+    up_x = dir_y * side_z - dir_z * side_y;
+    up_y = dir_z * side_x - dir_x * side_z;
+    up_z = dir_x * side_y - dir_y * side_x;
+
+    GLdouble m[16] = {side_x, side_y, side_z, 0.0,
+                      up_x, up_y, up_z, 0.0,
+                      dir_x, dir_y, dir_z, 0.0,
+                      0.0, 0.0, 0.0, 1.0};
+    glMultMatrixd(m);
+
+    GLdouble radius = 1;    // raio
+    GLdouble slices = 8.0; // fatias horizontais
+    GLdouble stack = 3.0;  // fatias verticais
+
+    // Desenha como cilindros
+    gluCylinder(quad_obj, radius, radius, bone_length, slices, stack);
 
     glPopMatrix();
 }
 
+// Desenha um nodo da hierarquia (chamada recursiva)
+void drawNode(Node *node) {
+    int c = 0;
+    glPushMatrix();
+
+    if (node->channels == 6) {
+        glTranslatef(node->channelData[0], node->channelData[1], node->channelData[2]);
+        c = 3;
+    } else
+        glTranslatef(node->offset[0], node->offset[1], node->offset[2]);
+    glRotatef(node->channelData[c++], 0, 0, 1);
+    glRotatef(node->channelData[c++], 1, 0, 0);
+    glRotatef(node->channelData[c++], 0, 1, 0);
+
+    if (node->numChildren == 0)
+        renderBone(0, 0, 0, node->offset[0], node->offset[1], node->offset[2]);
+    else if (node->numChildren == 1) {
+        Node *child = node->children[0];
+        renderBone(0, 0, 0, child->offset[0], child->offset[1], child->offset[2]);
+    } else {
+        int nc = 0;
+        float center[3] = {0.0f, 0.0f, 0.0f};
+        for (int i = 0; i < node->numChildren; i++) {
+            if (!node->children[i])
+                continue;
+            nc++;
+            Node *child = node->children[i];
+            center[0] += child->offset[0];
+            center[1] += child->offset[1];
+            center[2] += child->offset[2];
+        }
+        center[0] /= nc + 1;
+        center[1] /= nc + 1;
+        center[2] /= nc + 1;
+
+        renderBone(0.0f, 0.0f, 0.0f, center[0], center[1], center[2]);
+
+        for (int i = 0; i < nc; i++) {
+            Node *child = node->children[i];
+            renderBone(center[0], center[1], center[2],
+                       child->offset[0], child->offset[1], child->offset[2]);
+        }
+    }
+
+    for (int i = 0; i < node->numChildren; i++)
+        if (node->children[i])
+            drawNode(node->children[i]);
+    glPopMatrix();
+}
+
 void drawSkeleton() {
-    drawNode(0, 0, 0, root);
+    drawNode(root);
 }
 
 void freeTree() {
@@ -245,44 +320,26 @@ void freeNode(Node *node) {
 //  Desenha um quadriculado para representar um piso
 // **********************************************************************
 void drawFloor() {
-    const float LARG = 1000.0;
-    int qtd = 40;
-    float delta = (2 * LARG) / (qtd - 1);
-    float z = -LARG;
-
-    int i;
-    for (i = 0; i < qtd; i++) {
-        glBegin(GL_LINES);
-        glVertex3f(-LARG, 0, z);
-        glVertex3f(LARG, 0, z);
-        glEnd();
-        glBegin(GL_LINES);
-        glVertex3f(z, 0, -LARG);
-        glVertex3f(z, 0, LARG);
-        glEnd();
-
-        z += delta;
+    float size = 50;
+    int num_x = 100, num_z = 100;
+    double ox, oz;
+    glBegin(GL_QUADS);
+    glNormal3d(0.0, 1.0, 0.0);
+    ox = -(num_x * size) / 2;
+    for (int x = 0; x < num_x; x++, ox += size) {
+        oz = -(num_z * size) / 2;
+        for (int z = 0; z < num_z; z++, oz += size) {
+            if (((x + z) % 2) == 0)
+                glColor3f(1.0, 1.0, 1.0);
+            else
+                glColor3f(0.8, 0.8, 0.8);
+            glVertex3d(ox, 0.0, oz);
+            glVertex3d(ox, 0.0, oz + size);
+            glVertex3d(ox + size, 0.0, oz + size);
+            glVertex3d(ox + size, 0.0, oz);
+        }
     }
-
-}
-
-// **********************************************************************
-//  Desenha os eixos coordenados
-// **********************************************************************
-void drawAxes() {
-    glBegin(GL_LINES);
-    glColor3f(1, 0, 0); // vermelho
-
-    glVertex3f(0, 0, 0); // Eixo X
-    glVertex3f(50, 0, 0);
-
-    glVertex3f(0, 0, 0); // Eixo Y
-    glVertex3f(0, 50, 0);
-
-    glVertex3f(0, 0, 0); // Eixo X
-    glVertex3f(0, 0, 50);
     glEnd();
-
 }
 
 // Função callback para eventos de botões do mouse
@@ -375,15 +432,10 @@ void display() {
 
     glMatrixMode(GL_MODELVIEW);
 
-    glRotatef(30, 0, 1, 0); // Gira o cenario todo
-    drawAxes();
-    glColor3f(0.0f, 0.0, 1.0f); // azul
     drawFloor();
 
     glPushMatrix();
-    //glRotatef(angX,1,0,0);
-    glRotatef(angY, 0, 1, 0);
-    glColor3f(1.0f, 1.0, 0.0f); // amarelo
+    glColor3f(0.7, 0.0, 0.0); // vermelho
     drawSkeleton();
     glPopMatrix();
 
@@ -440,10 +492,32 @@ void arrow_keys(int a_keys, int x, int y) {
 //	Inicializa os parâmetros globais de OpenGL
 // **********************************************************************
 void init() {
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // Fundo de tela preto
+    // Parametros da fonte de luz
+    float light0_position[] = {10.0, 100.0, 100.0, 1.0};
+    float light0_diffuse[] = {0.8, 0.8, 0.8, 1.0};
+    float light0_specular[] = {1.0, 1.0, 1.0, 1.0};
+    float light0_ambient[] = {0.1, 0.1, 0.1, 1.0};
+
+    // Ajusta
+    glLightfv(GL_LIGHT0, GL_POSITION, light0_position);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, light0_diffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, light0_specular);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, light0_ambient);
+
+    // Habilita estados necessarios
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_COLOR_MATERIAL);
+    glEnable(GL_DEPTH_TEST);
+    glCullFace(GL_BACK);
+    glEnable(GL_CULL_FACE);
+
+    glClearColor(0.5, 0.5, 0.8, 0.0);
 
     angX = 0.0;
     angY = 0.0;
+    rotY = 170;
+    rotX = 35;
 }
 
 // **********************************************************************
