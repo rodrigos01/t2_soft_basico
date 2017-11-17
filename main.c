@@ -47,6 +47,8 @@ void freeTree();
 
 void freeNode(Node *node);
 
+Node *createNodeFromFile(FILE *fp, Node *parent) ;
+
 // Variaveis globais para manipulacao da visualizacao 3D
 int width, height;
 float deltax = 0, deltay = 0;
@@ -98,13 +100,7 @@ Node *createNode(char name[20], Node *parent, int numChannels, float ofx, float 
 // DADOS DE EXEMPLO DO PRIMEIRO FRAME
 //
 
-float data[] = {-326.552, 98.7701, 317.634, 71.4085, 60.8487, 17.2406, -70.1915, 0, 88.8779, 84.6529, 68.0632,
-                -5.27801, 0.719492, 15.2067, 13.3733, -135.039, 24.774, 172.053, -171.896, 64.9682, -165.105,
-                3.6548, 1.03593, -36.4128, -55.7886, 37.8019, -120.338, 9.39682, 14.0503, -27.1815, 4.41274,
-                -0.125185, -1.52942, 1.33299, -4.20935, 46.1022, -92.5385, -35.676, 63.2656, -5.23096, -15.2195,
-                9.30354, 11.1114, -0.982512, -11.0421, -86.4319, -3.01435, 76.3394, 1.71268, 24.9011, -2.42099,
-                9.483, 17.5267, -1.42749, -37.0021, -44.3019, -39.1702, -46.2538, -2.58689, 78.4703, 1.9216, 29.8211,
-                -1.99744, -3.70506, 1.06523, 0.577189, 0.146783, 3.70013, 2.9702};
+float **data;
 
 // Pos. da aplicacao dos dados
 int dataPos;
@@ -124,45 +120,101 @@ void applyData(float data[], Node *n) {
 
 void apply() {
     dataPos = 0;
-    applyData(data, root);
+    applyData(data[curFrame], root);
+}
+
+int startOfNode(const char *ch) {
+    if (strcmp(ch, "ROOT") == 0
+        || strcmp(ch, "JOINT") == 0
+        || strcmp(ch, "End") == 0) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+void createHierarchy(FILE *fp) {
+    root = createNodeFromFile(fp, NULL);
+}
+
+Node *createNodeFromFile(FILE *fp, Node *parent) {
+    Node *node = malloc(sizeof(Node));
+    node->parent = parent;
+    char ch[255];
+    int childCount = 0;
+    Node **children = calloc(sizeof(Node *), 5);
+    fscanf(fp, "%s", node->name);
+    while(fscanf(fp, "%s", ch) != EOF && strcmp(ch, "}") != 0) {
+        if (strcmp(ch, "OFFSET") == 0){
+            fscanf(fp, "%f", &node->offset[0]);
+            fscanf(fp, "%f", &node->offset[1]);
+            fscanf(fp, "%f", &node->offset[2]);
+        } else if (strcmp(ch, "CHANNELS") == 0) {
+            fscanf(fp, "%d", &node->channels);
+            for (int i = 0; i < node->channels; i++) {
+                fscanf(fp, "%s", ch); // We don't need the channels data
+            }
+        } else if (startOfNode(ch)) {
+            Node *child = createNodeFromFile(fp, node);
+            children[childCount++] = child;
+        }
+    }
+    if (node->channels == 0) {
+        node->channels = parent->channels;
+    }
+    node->channelData = calloc(sizeof(float), node->channels);
+    node->numChildren = childCount;
+    node->children = calloc(sizeof(Node *), childCount);
+    for (int i = 0; i < childCount; i++) {
+        node->children[i] = children[i];
+    }
+    return node;
+}
+
+void createMotion(FILE *fp) {
+    char ch[255];
+    char line[1000];
+    fscanf(fp, "%s", ch);
+    if (strcmp(ch, "Frames:") == 0) {
+        fscanf(fp, "%d", &totalFrames);
+    }
+    data = calloc(sizeof(float)*1000, totalFrames);
+    fgets(line, 1000, fp); // Ignored frame time
+    fgets(line, 1000, fp); // Ignored frame time
+
+    char delims[] = " \t\r\n";
+
+    int dataIndex = 0;
+    float value;
+    while (fgets(line, 1000, fp) != NULL) {
+        float *frameData = malloc(sizeof(float) * 1000);
+        int frameDataIndex = 0;
+        char *val = strtok(line, delims);
+        while (val != NULL) {
+            sscanf(val, "%f", &value);
+            frameData[frameDataIndex++] = value;
+            val = strtok(NULL, delims);
+        }
+        data[dataIndex++] = frameData;
+    }
+
 }
 
 void initMaleSkel() {
-    root = createNode("Hips", NULL, 6, 0, 0, 0, 3);
 
-    Node *toSpine = createNode("ToSpine", root, 3, -2.69724, 7.43032, -0.144315, 1);
-    Node *spine = createNode("Spine", toSpine, 3, -0.0310711, 10.7595, 1.96963, 1);
-    Node *spine1 = createNode("Spine1", spine, 3, 19.9056, 3.91189, 0.764692, 3);
-
-    Node *neck = createNode("Neck", spine1, 3, 25.9749, 7.03908, -0.130764, 1);
-    Node *head = createNode("Head", neck, 3, 9.52751, 0.295786, -0.907742, 1);
-    Node *top = createNode("Top", head, 3, 16.4037, 0.713936, 2.7358, 0);
-
-    /**/
-    Node *leftShoulder = createNode("LeftShoulder", spine1, 3, 17.7449, 4.33886, 11.7777, 1);
-    Node *leftArm = createNode("LeftArm", leftShoulder, 3, 0.911315, 1.27913, 9.80584, 1);
-    Node *leftForeArm = createNode("LeftForeArm", leftArm, 3, 28.61265, 1.18197, -3.53199, 1);
-    Node *leftHand = createNode("LeftHand", leftForeArm, 3, 27.5088, 0.0218783, 0.327423, 1);
-    Node *endLeftHand = createNode("EndLHand", leftHand, 3, 18.6038, -0.000155887, 0.382096, 0);
-
-    /**/
-    Node *rShoulder = createNode("RShoulder", spine1, 3, 17.1009, 2.89543, -12.2328, 1);
-    Node *rArm = createNode("RArm", rShoulder, 3, 1.4228, 0.178766, -10.211, 1);
-    Node *rForeArm = createNode("RForeArm", rArm, 3, 28.733, 1.87905, 2.64907, 1);
-    Node *rHand = createNode("RHand", rForeArm, 3, 27.4588, 0.290562, -0.101845, 1);
-    Node *endRHand = createNode("RLHand", rHand, 3, 17.8396, -0.255518, -0.000602873, 0);
-
-    Node *lUpLeg = createNode("LUpLeg", root, 3, -5.61296, -2.22332, -10.2353, 1);
-    Node *lLeg = createNode("LLeg", lUpLeg, 3, 2.56703, -44.7417, -7.93097, 1);
-    Node *lFoot = createNode("LFoot", lLeg, 3, 3.16933, -46.5642, -3.96578, 1);
-    Node *lToe = createNode("LToe", lFoot, 3, 0.346054, -6.02161, 12.8035, 1);
-    Node *lToe2 = createNode("LToe2", lToe, 3, 0.134235, -1.35082, 5.13018, 0);
-
-    Node *rUpLeg = createNode("RUpLeg", root, 3, -5.7928, -1.72406, 10.6446, 1);
-    Node *rLeg = createNode("RLeg", rUpLeg, 3, -2.57161, -44.7178, -7.85259, 1);
-    Node *rFoot = createNode("RFoot", rLeg, 3, -3.10148, -46.5936, -4.03391, 1);
-    Node *rToe = createNode("RToe", rFoot, 3, -0.0828122, -6.13587, 12.8035, 1);
-    Node *rToe2 = createNode("RToe2", rToe, 3, -0.131328, -1.35082, 5.13018, 0);
+    FILE *fp = fopen("bvh/Male1_B24_WalkToCrouch.bvh", "r");
+    if (fp == NULL) {
+        printf("File not found\n");
+    }
+    char ch[255];
+    while(fscanf(fp, "%s", ch) != EOF) {
+        if (strcmp(ch,"HIERARCHY") == 0) {
+            createHierarchy(fp);
+        } else if (strcmp(ch, "MOTION") == 0) {
+            createMotion(fp);
+        }
+        printf("%s ", ch);
+    }
 
     apply();
 }
