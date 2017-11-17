@@ -140,6 +140,7 @@ void createHierarchy(FILE *fp) {
 Node *createNodeFromFile(FILE *fp, Node *parent) {
     Node *node = malloc(sizeof(Node));
     node->parent = parent;
+    node->channels = 0;
     char ch[255];
     int childCount = 0;
     Node **children = calloc(sizeof(Node *), 5);
@@ -165,9 +166,8 @@ Node *createNodeFromFile(FILE *fp, Node *parent) {
     node->channelData = calloc(sizeof(float), node->channels);
     node->numChildren = childCount;
     node->children = calloc(sizeof(Node *), childCount);
-    for (int i = 0; i < childCount; i++) {
-        node->children[i] = children[i];
-    }
+    memcpy(node->children, children, sizeof(Node *) * childCount);
+    free(children);
     return node;
 }
 
@@ -178,7 +178,7 @@ void createMotion(FILE *fp) {
     if (strcmp(ch, "Frames:") == 0) {
         fscanf(fp, "%d", &totalFrames);
     }
-    data = calloc(sizeof(float)*1000, totalFrames);
+    float **tmpData = calloc(sizeof(float)*1000, totalFrames);
     fgets(line, 1000, fp); // Ignored frame time
     fgets(line, 1000, fp); // Ignored frame time
 
@@ -186,6 +186,7 @@ void createMotion(FILE *fp) {
 
     int dataIndex = 0;
     float value;
+    long mem = 0;
     while (fgets(line, 1000, fp) != NULL) {
         float *frameData = malloc(sizeof(float) * 1000);
         int frameDataIndex = 0;
@@ -195,16 +196,23 @@ void createMotion(FILE *fp) {
             frameData[frameDataIndex++] = value;
             val = strtok(NULL, delims);
         }
-        data[dataIndex++] = frameData;
+        tmpData[dataIndex] = calloc(sizeof(float), frameDataIndex);
+        long curMem = sizeof(float) * frameDataIndex;
+        memcpy(tmpData[dataIndex], frameData, curMem);
+        free(frameData);
+        dataIndex++;
+        mem += curMem;
     }
-
+    data = malloc(mem);
+    memcpy(data, tmpData, mem);
+    free(tmpData);
 }
 
-void initMaleSkel() {
+void initFile(char *filename) {
 
-    FILE *fp = fopen("bvh/Male1_B24_WalkToCrouch.bvh", "r");
+    FILE *fp = fopen(filename, "r");
     if (fp == NULL) {
-        printf("File not found\n");
+        printf("%s: File not found\n", filename);
     }
     char ch[255];
     while(fscanf(fp, "%s", ch) != EOF) {
@@ -592,7 +600,7 @@ int main(int argc, char **argv) {
 
     // Exemplo: monta manualmente um esqueleto
     // (no trabalho, deve-se ler do arquivo)
-    initMaleSkel();
+    initFile(argv[1]);
 
     // Define que o tratador de evento para
     // o redesenho da tela. A funcao "display"
